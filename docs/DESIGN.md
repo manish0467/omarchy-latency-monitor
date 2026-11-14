@@ -1,6 +1,11 @@
 # Design: io.github.manish0467.latency-monitor
 
-Status: **APPROVED (2026-11-15) — user accepted all four recommendations: D1 bar shows public-host ms (gateway lives in the panel), D2 fixed thresholds calibrated above this link (gateway 25/10 ms, public 150/40 ms, amber on any loss; red only when the public host is down), D3 per-target history sparkline (~40 samples), D4 re-measure every 1 min (floor 1).**
+Status: **SHIPPED (2026-11-15) — published, installed, submitted to marketplace.**
+
+Published: github.com/manish0467/omarchy-latency-monitor (default `main`; commit `820dab7`), annotated tag + release `v0.1.0`.
+Installed live on this machine (enabled, bar button at end of `bar.layout.right`).
+Marketplace submission: omacom/omarchy-plugin-marketplace#14996 (Category System, Tags System/Bar/Quickshell, full maintainer notes, 5 checklist boxes); OPEN awaiting triage.
+Design doc: `~/latency-monitor-DESIGN.md` (also repo `docs/DESIGN.md`).
 Target: Omarchy 4.5.0-3, Quickshell "Quattro" shell. Same architecture and
 standards as the published btrfs-snapshots and keybindings-cheatsheet plugins
 (thin BarWidget, data-owning Panel, stdlib-only Python helper, mocks, tests).
