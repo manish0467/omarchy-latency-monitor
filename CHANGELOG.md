@@ -15,3 +15,7 @@ First release.
   history state file, mock scenarios for every state.
 - Settings: public host, per-target latency/jitter thresholds, poll interval,
   idle behaviour, theme-adaptable amber via `bar.degraded` in shell.toml.
+
+## 0.1.1 — 2026-11-15
+
+- Hardening: history.json temp file is now chmod 0600 before rename (umask-independent), matching the keybindings plugin's fix.

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.manish0467.latency-monitor",
   "name": "Latency Monitor",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": "Manish",
   "license": "MIT",
   "description": "Ping and jitter to your gateway and a public host, with a history sparkline. The bar turns amber when the connection degrades; red only when it is down. Read-only.",
