@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.manish0467.latency-monitor",
+  "name": "Latency Monitor",
+  "version": "0.1.0",
+  "author": "Manish",
+  "license": "MIT",
+  "description": "Ping and jitter to your gateway and a public host, with a history sparkline. The bar turns amber when the connection degrades; red only when it is down. Read-only.",
+  "repository": "https://github.com/manish0467/omarchy-latency-monitor",
+  "homepage": "https://github.com/manish0467/omarchy-latency-monitor",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Latency Monitor",
+    "description": "Gateway and public-host latency, jitter and loss with thresholds, an amber degraded state and history sparklines",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
