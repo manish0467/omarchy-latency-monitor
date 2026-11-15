@@ -19,3 +19,7 @@ First release.
 ## 0.1.1 — 2026-11-15
 
 - Hardening: history.json temp file is now chmod 0600 before rename (umask-independent), matching the keybindings plugin's fix.
+
+## 0.1.2 — 2026-11-15
+
+- Security: temp file and lock file now created 0600 via os.open(O_NOFOLLOW), closing the symlink-following/truncation vector reported by HANCORE-linux.

@@ -37,7 +37,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 SCHEMA = 1
-VERSION = "0.1.1"
+VERSION = "0.1.2"
 PLUGIN_ID = "io.github.manish0467.latency-monitor"
 
 # ---------------------------------------------------------------------------
@@ -134,10 +134,15 @@ def write_json_atomic(path, data):
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(path.suffix + ".tmp")
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, indent=1, sort_keys=True)
-            fh.write("\n")
-        os.chmod(str(tmp), 0o600)
+        fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(data, fh, indent=1, sort_keys=True)
+                fh.write("\n")
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.close(fd)
+            raise
         os.replace(str(tmp), str(path))
     except OSError:
         pass
@@ -280,7 +285,10 @@ class Lock:
     def __enter__(self):
         try:
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
-            self.handle = open(self.path, "w")
+            if Path(self.path).is_symlink():
+                raise OSError("lock path is a symlink")
+            fd = os.open(str(self.path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+            self.handle = os.fdopen(fd, "w")
             fcntl.flock(self.handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
             if self.handle:
