@@ -121,6 +121,58 @@ class TestDefensiveState(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(len(doc["history"]), 1)   # fresh append survived
 
+    def _planted_parent_layout(self):
+        """State dir whose final parent component is a symlink to a victim
+        directory. O_NOFOLLOW on the final file name alone does not stop this:
+        the parent symlink is followed before open(O_TRUNC) happens."""
+        victim = self.tmp / "victim"
+        victim.mkdir()
+        (victim / "lock").write_text("VICTIM LOCK")
+        (victim / "history.json.tmp").write_text("VICTIM TMP")
+        state = self.tmp / "omarchy" / "settings" / lt.PLUGIN_ID
+        state.parent.mkdir(parents=True)
+        state.symlink_to(victim, target_is_directory=True)
+        return state, victim
+
+    def test_lock_refuses_symlinked_parent(self):
+        state, victim = self._planted_parent_layout()
+        with lt.Lock(state) as lock:
+            self.assertIsNone(lock.handle)          # cannot lock -> busy doc
+        self.assertEqual((victim / "lock").read_text(), "VICTIM LOCK")
+
+    def test_history_tmp_refuses_symlinked_parent(self):
+        state, victim = self._planted_parent_layout()
+        lt.write_json_atomic(state / lt.STATE_FILE, {"schema": 1, "x": "y"})
+        self.assertEqual((victim / "history.json.tmp").read_text(), "VICTIM TMP")
+        self.assertFalse((victim / lt.STATE_FILE).exists())
+
+    def test_symlink_at_any_parent_component_is_refused(self):
+        # A symlink higher up the hierarchy (not just the final component of
+        # the state dir) must be refused too. Build the victim so that the
+        # redirect would land exactly on its "lock" file.
+        victim = self.tmp / "victim"
+        redirected = victim / "settings" / lt.PLUGIN_ID
+        redirected.mkdir(parents=True)
+        (redirected / "lock").write_text("VICTIM LOCK")
+        (self.tmp / "omarchy").symlink_to(victim, target_is_directory=True)
+        state = self.tmp / "omarchy" / "settings" / lt.PLUGIN_ID
+        with lt.Lock(state) as lock:
+            self.assertIsNone(lock.handle)
+        self.assertEqual((redirected / "lock").read_text(), "VICTIM LOCK")
+
+    def test_write_json_atomic_reused_tmp_is_owner_only(self):
+        # O_CREAT's 0600 applies only to a NEW file; a leftover tmp from an
+        # interrupted save could be 0644. fchmod must fix that before writing.
+        import stat
+        p = self.tmp / "history.json"
+        tmp = self.tmp / "history.json.tmp"
+        tmp.write_text("stale")
+        os.chmod(tmp, 0o644)
+        lt.write_json_atomic(p, {"schema": 1, "note": "secret"})
+        self.assertFalse(tmp.exists())
+        self.assertEqual(stat.S_IMODE(p.stat().st_mode), 0o600)
+        self.assertIn("secret", p.read_text())
+
 
 class TestProcessHygiene(unittest.TestCase):
     def test_helper_as_subprocess(self):

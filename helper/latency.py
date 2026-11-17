@@ -37,7 +37,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 SCHEMA = 1
-VERSION = "0.1.2"
+VERSION = "0.1.3"
 PLUGIN_ID = "io.github.manish0467.latency-monitor"
 
 # ---------------------------------------------------------------------------
@@ -129,21 +129,71 @@ def read_json(path, default):
         return default
 
 
+def _open_dir_component(name, dir_fd, create):
+    """Open one path component as a directory relative to dir_fd, or create
+    it (0700) when missing. O_NOFOLLOW refuses a symlink at this component;
+    O_DIRECTORY refuses a regular file. Never follows a planted symlink."""
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    try:
+        return os.open(name, flags, dir_fd=dir_fd)
+    except FileNotFoundError:
+        if not create:
+            raise
+        with contextlib.suppress(FileExistsError):  # a concurrent creator
+            os.mkdir(name, 0o700, dir_fd=dir_fd)
+        return os.open(name, flags, dir_fd=dir_fd)  # re-check: still no symlink
+
+
+def open_dir_no_symlinks(path, create=False):
+    """Open `path` as a directory descriptor, refusing a symlink at ANY
+    component — not just the final one (which O_NOFOLLOW alone would cover).
+
+    Walking from '/' with openat-style dir_fd pins each parent by an open
+    descriptor, so a local account that can swap a parent entry in a
+    non-sticky state hierarchy cannot redirect a later truncating open; there
+    is no check-then-use window. Returns an fd the caller must os.close().
+    Raises OSError on a symlink, a non-directory component, or a bad path.
+    """
+    parts = [p for p in os.path.abspath(str(path)).split(os.sep) if p]
+    dir_fd = os.open(os.sep, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for part in parts:
+            next_fd = _open_dir_component(part, dir_fd, create)
+            os.close(dir_fd)
+            dir_fd = next_fd
+        return dir_fd
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.close(dir_fd)
+        raise
+
+
 def write_json_atomic(path, data):
     path = Path(path)
+    tmp = path.with_suffix(path.suffix + ".tmp")
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(path.suffix + ".tmp")
-        fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+        dir_fd = open_dir_no_symlinks(path.parent, create=True)
         try:
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                json.dump(data, fh, indent=1, sort_keys=True)
-                fh.write("\n")
-        except BaseException:
-            with contextlib.suppress(OSError):
-                os.close(fd)
-            raise
-        os.replace(str(tmp), str(path))
+            fd = os.open(tmp.name,
+                         os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW,
+                         0o600, dir_fd=dir_fd)
+            try:
+                # O_CREAT's mode is ignored for an existing file: force 0600
+                # on the descriptor before writing so a reused temp file can
+                # never expose confidential data to another local account.
+                os.fchmod(fd, 0o600)
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    json.dump(data, fh, indent=1, sort_keys=True)
+                    fh.write("\n")
+            except BaseException:
+                with contextlib.suppress(OSError):
+                    os.close(fd)
+                raise
+            # Rename via the same pinned directory fd: no path re-walk, so a
+            # parent cannot be swapped between the open and the replace.
+            os.replace(tmp.name, path.name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+        finally:
+            os.close(dir_fd)
     except OSError:
         pass
 
@@ -283,11 +333,15 @@ class Lock:
         self.handle = None
 
     def __enter__(self):
+        dir_fd = None
         try:
-            Path(self.path).parent.mkdir(parents=True, exist_ok=True)
-            if Path(self.path).is_symlink():
-                raise OSError("lock path is a symlink")
-            fd = os.open(str(self.path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+            # Pin the state directory through every parent component; a
+            # symlink anywhere in the path (not just at "lock") is refused
+            # before the truncating open below.
+            dir_fd = open_dir_no_symlinks(self.path.parent, create=True)
+            fd = os.open(self.path.name,
+                         os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW,
+                         0o600, dir_fd=dir_fd)
             self.handle = os.fdopen(fd, "w")
             fcntl.flock(self.handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
@@ -295,6 +349,10 @@ class Lock:
                 with contextlib.suppress(OSError):
                     self.handle.close()
             self.handle = None
+        finally:
+            if dir_fd is not None:
+                with contextlib.suppress(OSError):
+                    os.close(dir_fd)
         return self
 
     def __exit__(self, *exc):
